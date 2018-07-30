@@ -8,7 +8,7 @@ Note that the method has been developed for claims in Switzerland. When using it
 
 ## Prerequisites
 ### Software
-This toolbox was developed and tested with *ArcGIS 10.6*, which is shipped with *Python 2.7*. In addition, the toolbox requires the *Spatial Analyst* extention. The toolbox may also work with other cversions, however, this has not been tested. Refer to the following links for detailed information regarding these software packages, their dependencies and how to install them:
+This toolbox was developed and tested with *ArcGIS 10.6*, which is shipped with *Python 2.7*. In addition, the toolbox requires the *Spatial Analyst* extention. The toolbox may also work with other versions, however, this has not been tested. Refer to the following links for detailed information regarding these software packages, their dependencies and how to install them:
 
 * [Arcpy](http://desktop.arcgis.com/en/arcmap/latest/analyze/arcpy/what-is-arcpy-.htm)
 * [ArcGIS Spatial Analyst extension](http://desktop.arcgis.com/en/arcmap/latest/extensions/spatial-analyst/what-is-the-spatial-analyst-extension.htm)
