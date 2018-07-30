@@ -29,9 +29,9 @@ class ClassifyClaims(object):
     # First level functions
     def __init__(self):
         self.label = "ClassifyDamageClaims"
-        self.description = "Classify damage claims according to the \
-                            triggering processes of surface water flooding \
-                            or fluvial flooding."
+        self.description = """Classify damage claims according to the 
+                           triggering processes of surface water flooding 
+                           or fluvial flooding."""
         self.canRunInBackground = False
 
     def getParameterInfo(self):
@@ -215,7 +215,7 @@ class ClassifyClaims(object):
                                    "CL_CEucl_1.1_Toolbox")
             in_gis = os.path.join("D:\\08_Data", "GIS")
             in_claims = os.path.join(in_root, "01_Input",
-                        "20160911_DDat_PICB_geo_just_maincols_GR_1sample.shp")
+                        "20160911_DDat_PICB_geo_just_maincols_BS_9sample.shp")
             in_hmap_peri = os.path.join(in_gis, "GFK", "v201711", "Derivate", 
                                         "CH_SGK_W_Peri.shp")
             in_hmap_hzone = os.path.join(in_gis, "GFK", "v201711", "Derivate",
@@ -226,12 +226,15 @@ class ClassifyClaims(object):
             in_d50 = 138
             in_d75 = 305
             in_d99 = 1148
-            in_searchdist = 2000
-            in_outdir = os.path.join(in_root, "02_Toolbox")
+            in_searchdist = 5000
             in_dem = os.path.join(in_gis, "swissALTI3D", "swissALTI3D_tif", 
                                   "10m", "swissALTI3D_v2013_10m.tif")
             in_rivers = os.path.join(in_gis, "swissTLM3D", "Derivate",
                                      "1_x_2016", "TLM3D_FGew_n_o.shp")
+            in_outdir = os.path.join(in_root, "02_Toolbox")
+            in_outshp = "ClassifiedClaims"
+            in_detailed = True
+            in_cleanup = False
 
         elif exe_type == "Dialog":
             # Input from dialog box 
@@ -292,16 +295,24 @@ class ClassifyClaims(object):
         fields_drop = []
         fields_orig = arcpy.ListFields(dataset = out_feature)
         for field_orig in fields_orig:
-            if field_orig.name in ["FID", "Shape"]:
+            if field_orig.name in ["FID", "Shape", "OBJECTID", "SHAPE", 
+                                   "SHAPE_Length", "SHAPE_AREA"]:
                 next
             else:
                 fields_drop.append(field_orig.name)
 
         if fields_drop != []:
-            arcpy.DeleteField_management(in_table = out_feature,
-                                         drop_field = fields_drop)
+            try:
+                arcpy.DeleteField_management(in_table = out_feature,
+                                             drop_field = fields_drop)
+            except:
+                msg_tmp =  "     ATTENTION: Removing irrelevant fields " +\
+                      "for temporary feature layer failed. Thus, will be " +\
+                      "dragged along."
+                arcpy.AddMessage(msg_tmp)
+                print msg_tmp
 
-        fields_add = ["fid_orig",   # FID of input claim dataset
+        fields_add = ["uid_orig",   # UID of input claim dataset
                       "z_fromdem",  # elevation of each claim's location
                       "ed_hmap_p",  # Eucl. distance to hazard map perimeter
                       "lg_hmap_p",  # is claim within within hazard map peri.?
@@ -317,7 +328,7 @@ class ClassifyClaims(object):
                       "dh_wc",      # elevation diff. between claim and wc
                       "aced_perc",  # ACED's percentile relative to ref dist.
                       "class"]      # Claim's class
-        field_types = ["LONG",      # fid_orig
+        field_types = ["LONG",      # uid_orig
                        "FLOAT",     # z_fromdem
                        "FLOAT",     # ed_hmap_p
                        "SHORT",     # lg_hmap_p
@@ -348,73 +359,85 @@ class ClassifyClaims(object):
                                                 expression = -9999,
                                                 expression_type = "PYTHON_9.3")
         
-        fid_orig = []
+        in_fields = arcpy.ListFields(out_feature)
+        in_fields_names = [field.name for field in in_fields]
+        if "FID" in in_fields_names:
+            uid_field = "FID"
+        elif "OBJECTID" in in_fields_names:
+            uid_field = "OBJECTID"
+        else: 
+            msg_tmp = "Unique ID field could not be found. Thus, script " +\
+                      "will most likely fail."
+            arcpy.AddMessage(msg_tmp)
+            print msg_tmp
+        uid_orig = []
+
         with arcpy.da.SearchCursor(in_table = in_feature,
-                                   field_names = ["FID"]) as c_search_row:
+                                   field_names = [uid_field]) as c_search_row:
             for search_row in c_search_row:
-                fid_orig.append(search_row[0])
+                uid_orig.append(search_row[0])
 
         count_i = 0
         with arcpy.da.UpdateCursor(in_table = out_feature,
-                                   field_names = ["fid_orig"]) as c_update_row:
+                                   field_names = ["uid_orig"]) as c_update_row:
             for update_row in c_update_row:
-                update_row[0] = fid_orig[count_i]
+                update_row[0] = uid_orig[count_i]
                 c_update_row.updateRow(update_row)
                 count_i += 1
 
-        return fid_orig
+        return uid_orig
 
     def inferZfromPointsAndDEM(self, in_points, in_dem, in_field_name):
         out_points_path = os.path.join("in_memory", "ExtractedPointZ")
         arcpy.sa.ExtractValuesToPoints(in_point_features = in_points, 
                                        in_raster = in_dem,
                                        out_point_features = out_points_path)
-        fid_extracted = []
+        uid_extracted = []
         inferred_z = []
-        search_fields = ["fid_orig", "RASTERVALU"]
+        search_fields = ["uid_orig", "RASTERVALU"]
         with arcpy.da.SearchCursor(in_table = out_points_path,
                                    field_names = search_fields) as c_search_row:
             for search_row in c_search_row:
-                fid_extracted.append(search_row[0])
+                uid_extracted.append(search_row[0])
                 inferred_z.append(search_row[1])
 
-        update_fields = ["fid_orig", in_field_name]
+        update_fields = ["uid_orig", in_field_name]
         with arcpy.da.UpdateCursor(in_table = in_points,
                                    field_names = update_fields) as c_update_row:
             for update_row in c_update_row:
-                fid_orig_i = update_row[0]
-                if fid_orig_i not in fid_extracted:
+                uid_orig_i = update_row[0]
+                if uid_orig_i not in uid_extracted:
                     update_row[1] = -9999.0
                 else:
-                    ind = fid_extracted.index(fid_orig_i)
+                    ind = uid_extracted.index(uid_orig_i)
                     update_row[1] = inferred_z[ind]
                 c_update_row.updateRow(update_row)
 
     def inferZfromPolygonsAndDEM(self, in_polygons, in_dem, in_field_name):
         out_table_path = os.path.join("in_memory", "ExtractedMeanZ")
         arcpy.sa.ZonalStatisticsAsTable (in_zone_data = in_polygons,
-                                         zone_field = "fid_orig",
+                                         zone_field = "uid_orig",
                                          in_value_raster = in_dem,
                                          out_table = out_table_path,
                                          statistics_type= "MEAN")
-        fid_extracted = []
+        uid_extracted = []
         inferred_z = []
-        search_fields = ["fid_orig", "MEAN"]
+        search_fields = ["uid_orig", "MEAN"]
         with arcpy.da.SearchCursor(in_table = out_table_path,
                                    field_names = search_fields) as c_search_row:
             for search_row in c_search_row:
-                fid_extracted.append(search_row[0])
+                uid_extracted.append(search_row[0])
                 inferred_z.append(search_row[1])
 
-        update_fields = ["fid_orig", in_field_name]
+        update_fields = ["uid_orig", in_field_name]
         with arcpy.da.UpdateCursor(in_table = in_polygons,
                                    field_names = update_fields) as c_update_row:
             for update_row in c_update_row:
-                fid_orig_i = update_row[0]
-                if fid_orig_i not in fid_extracted:
+                uid_orig_i = update_row[0]
+                if uid_orig_i not in uid_extracted:
                     update_row[1] = -9999
                 else: 
-                    ind = fid_extracted.index(fid_orig_i)
+                    ind = uid_extracted.index(uid_orig_i)
                     update_row[1] = inferred_z[ind]
                 c_update_row.updateRow(update_row)  
 
@@ -449,8 +472,8 @@ class ClassifyClaims(object):
             arcpy.DeleteField_management(in_table = in_feature_from, 
                                          drop_field = ("NEAR_FID", "NEAR_DIST"))
 
-    def copyDamageLocation(self, in_claims, out_claim, fid, fid_field_name):
-        clause = '"%s" = %s' % (fid_field_name, str(fid))
+    def copyDamageLocation(self, in_claims, out_claim, uid, uid_field_name):
+        clause = '"%s" = %s' % (uid_field_name, str(uid))
         arcpy.Select_analysis(in_features = in_claims,
                               out_feature_class = out_claim,
                               where_clause = clause)
@@ -575,22 +598,22 @@ class ClassifyClaims(object):
                                           in_field_name = "z_fromdem") 
 
     def assessACEDist2WatCourses(self, in_feature, in_dem, in_rivers, 
-                                 claim_fid, search_dist):
+                                 claim_uid, search_dist):
 
-        acedist = [-9999.0] * len(claim_fid)
-        near_x = [-9999.0] * len(claim_fid)
-        near_y = [-9999.0] * len(claim_fid)
+        acedist = [-9999.0] * len(claim_uid)
+        near_x = [-9999.0] * len(claim_uid)
+        near_y = [-9999.0] * len(claim_uid)
 
         # Compute altidude constrained Euclidean distances to next water course
-        for i in range(0, len(claim_fid)):
+        for i in range(0, len(claim_uid)):
             msg = "  -> Processing claim i = " + str(i)
             arcpy.AddMessage(msg)
             print msg
             claim_copy = os.path.join("in_memory", "Claim_copy")
             self.copyDamageLocation(in_claims = in_feature,
                                     out_claim = claim_copy, 
-                                    fid = claim_fid[i],
-                                    fid_field_name = "fid_orig")
+                                    uid = claim_uid[i],
+                                    uid_field_name = "uid_orig")
 
             search_fields = ["SHAPE@X", "SHAPE@Y", "z_fromdem"]
             with arcpy.da.SearchCursor(
@@ -632,7 +655,7 @@ class ClassifyClaims(object):
 
         return acedist_return
 
-    def postprocessACEDists(self, in_feature, in_dem, in_wc, claim_fid, 
+    def postprocessACEDists(self, in_feature, in_dem, in_wc, claim_uid, 
                             aced_results):
         acedist_inferred = aced_results[0]
         x_wc_near_inferred = aced_results[1]
@@ -685,13 +708,13 @@ class ClassifyClaims(object):
                 next
 
         # Transfer values to in_feature
-        fields = ["fid_orig", "z_fromdem", "x_wc_near", "y_wc_near", 
+        fields = ["uid_orig", "z_fromdem", "x_wc_near", "y_wc_near", 
                   "z_wc_near", "aced_wc", "dh_wc"]
         with arcpy.da.UpdateCursor(in_table = in_feature,
                                    field_names = fields) as c_update_row:
             for update_row in c_update_row:
-                fid_orig_i = update_row[0]
-                ind_i = claim_fid.index(fid_orig_i)
+                uid_orig_i = update_row[0]
+                ind_i = claim_uid.index(uid_orig_i)
                 update_row[2] = x_wc_near_inferred[ind_i]
                 update_row[3] = y_wc_near_inferred[ind_i]
                 update_row[4] = z_wc_near_inferred[ind_i]
@@ -783,7 +806,7 @@ class ClassifyClaims(object):
         self.initializeWorkspace(in_outdir = outdir)
 
         claims_temp = os.path.join("in_memory", "Claims_temp")
-        claim_fid_orig = self.createOutputDataset(in_feature = claims_input,
+        claim_uid_orig = self.createOutputDataset(in_feature = claims_input,
                                                   out_feature = claims_temp)
         result_backup_00 = os.path.join(outdir, "Temp", "00_Output_Init.shp")
         arcpy.CopyFeatures_management(in_features = claims_temp,
@@ -809,13 +832,13 @@ class ClassifyClaims(object):
         acedist_vals = self.assessACEDist2WatCourses(in_feature = claims_temp,
                                                      in_dem = dem,
                                                      in_rivers = rivers,
-                                                     claim_fid = claim_fid_orig,
+                                                     claim_uid = claim_uid_orig,
                                                      search_dist = searchdist)
 
         self.postprocessACEDists(in_feature = claims_temp,
                                  in_dem = dem,
                                  in_wc = rivers,
-                                 claim_fid = claim_fid_orig,
+                                 claim_uid = claim_uid_orig,
                                  aced_results = acedist_vals)
         result_backup_02 = os.path.join(outdir, "Temp", "02_Output_ACEDist.shp")
         arcpy.CopyFeatures_management(in_features = claims_temp,
@@ -840,13 +863,13 @@ class ClassifyClaims(object):
         arcpy.CopyFeatures_management(in_features = claims_input,
                                       out_feature_class = export_claims)
         arcpy.AddField_management(in_table = export_claims,
-                                  field_name = "fid_orig", 
+                                  field_name = "uid_orig", 
                                       field_type = "LONG")
         count_i = 0
         with arcpy.da.UpdateCursor(in_table = export_claims,
-                                   field_names = ["fid_orig"]) as c_update_row:
+                                   field_names = ["uid_orig"]) as c_update_row:
             for update_row in c_update_row:
-                update_row[0] = claim_fid_orig[count_i]
+                update_row[0] = claim_uid_orig[count_i]
                 c_update_row.updateRow(update_row)
                 count_i += 1
 
@@ -854,7 +877,7 @@ class ClassifyClaims(object):
         fields_add = []
         if detailed:
             for field_data in fields_data:
-                if field_data.name in ["FID", "Shape", "fid_orig"]:
+                if field_data.name in ["uid_", "Shape", "uid_orig"]:
                     next
                 else:
                     fields_add.append(field_data.name)
@@ -862,9 +885,9 @@ class ClassifyClaims(object):
             fields_add.append(["class"])
 
         arcpy.JoinField_management(in_data = export_claims,
-                                   in_field = "fid_orig", 
+                                   in_field = "uid_orig", 
                                    join_table = result_backup_03,
-                                   join_field = "fid_orig",
+                                   join_field = "uid_orig",
                                    fields = fields_add)
 
         if outshp[-4] != ".shp":
